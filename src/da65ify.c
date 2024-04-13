@@ -10,7 +10,7 @@
 #define O_BINARY 0
 #endif
 
-#include "patch_segment_py.c"
+#include "../gen/patch_segment_py.c"
 
 
 int showHelp(const char *error) {
