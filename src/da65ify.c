@@ -10,6 +10,8 @@
 #define O_BINARY 0
 #endif
 
+#include "patch_segment_py.c"
+
 
 int showHelp(const char *error) {
     if (error != 0) {
@@ -233,32 +235,9 @@ int main(int argc, char **argv) {
     fclose(cdlf);
     int chrStart = 0x10 + (0x4000 * totalPRG);
     int chrSize = romfilestat.st_size - chrStart;
-    
-    // ENTRY
-    FILE *entry = fopen("entry.asm", "w");
-    if (entry == 0) {
-        fprintf(stderr, "Failed to write entry file\n");
-        return -2;
-    }
-    fprintf(entry, ".segment \"INES\"");
-    fprintf(entry, "\n.include \"ines.asm\"");
-    for (int i=0; i<totalBanks; ++i) {
-        fprintf(entry, "\
-\n.scope bank%d \
-\n.segment \"PRG%d\" \
-\n.include \"bank%d.asm\" \
-\n.endscope \
-\n", i, i, i);
-    }
 
-    if (chrSize != 0) {
-        fprintf(entry, "\
-\n.segment \"CHR\" \
-\n.incbin \"%s\", $%04x, $%x \
-\n", romfilepath, chrStart, chrSize);
-    }
-    fclose(entry);
-
+    FILE *patch_segment_out = fopen("patch_segment.py", "w");
+    fwrite(&patch_segment_py, 1, patch_segment_py_len, patch_segment_out);
 
     FILE *layout = fopen("layout", "w");
     if (layout == 0) {
@@ -294,25 +273,43 @@ int main(int argc, char **argv) {
     }
     fprintf(makefile, "\n.PHONY: clean");
     fprintf(makefile, "\n");
-    fprintf(makefile, "\nbuild: main.nes");
+
+    fprintf(makefile, "\nDISASM := da65");
+    fprintf(makefile, "\nASM := ca65");
+    fprintf(makefile, "\nLINK := ld65");
+    fprintf(makefile, "\nPYTHON := python");
+    fprintf(makefile, "\n");
+    fprintf(makefile, "\nTITLE := out");
+
+    fprintf(makefile, "\n");
+    fprintf(makefile, "\nbuild: ${TITLE}.nes");
     fprintf(makefile, "\n");
     fprintf(makefile, "\nintegritycheck: main.nes");
     fprintf(makefile, "\n\tradiff2 -x main.nes \"%s\" | head -n 100", romfilepath);
     fprintf(makefile, "\n");
     fprintf(makefile, "\ndisassembly:");
-    fprintf(makefile, "\n\tda65 -i ines.infofile");
+    fprintf(makefile, "\n\t${DISASM} -i ines.infofile");
     for (int i=0; i<totalBanks; ++i) {
-        fprintf(makefile, "\n\tda65 -i bank%d.infofile", i);
+        fprintf(makefile, "\n\t${DISASM} -i bank%d.infofile", i);
     }
+    for (int i=0; i<totalBanks; ++i) {
+        fprintf(makefile, "\n\t${PYTHON} patch_segment.py bank%d.asm bank%d.asm", i, i);
+    }
+    fprintf(makefile, "\n\t${PYTHON} patch_segment.py ines.asm ines.asm");
+
     fprintf(makefile, "\n");
-    fprintf(makefile, "\n%%.o: %%.asm");
-    fprintf(makefile, "\n\tca65 --create-dep \"$@.dep\" -g --debug-info $< -o $@");
+    fprintf(makefile, "\nASM_FILES := $(wildcard *.asm)");
+    fprintf(makefile, "\nOBJ_FILES := ${patsubst %%.asm,%%.o,${ASM_FILES}}");
+
     fprintf(makefile, "\n");
-    fprintf(makefile, "\nmain.nes: layout entry.o");
-    fprintf(makefile, "\n\tld65  --dbgfile $@.dbg -C $^ -o $@");
+    fprintf(makefile, "\n${OBJ_FILES}: %%.o: %%.asm");
+    fprintf(makefile, "\n\t${ASM} --create-dep \"$@.dep\" -g --debug-info $< -o $@");
+    fprintf(makefile, "\n");
+    fprintf(makefile, "\n${TITLE}.nes: layout ${OBJ_FILES}");
+    fprintf(makefile, "\n\t${LINK}  --dbgfile $@.dbg -C $^ -o $@");
     fprintf(makefile, "\n");
     fprintf(makefile, "\nclean:");
-    fprintf(makefile, "\n\trm -f ./main.nes ./*.nes.dbg ./*.o ./*.dep");
+    fprintf(makefile, "\n\trm -f ./${TITLE}.nes ./*.nes.dbg ./*.o ./*.dep");
     fprintf(makefile, "\n");
     fprintf(makefile, "\ninclude $(wildcard ./*.dep ./*/*.dep)");
 
